@@ -1,0 +1,77 @@
+# docker-compose for the full WebTogether stack.
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f backend
+#
+# Brings up:
+#   - postgres : PostgreSQL 16 (rooms/messages/users)
+#   - redis    : Redis 7 (presence, typing, socket adapter)
+#   - backend  : NestJS API + Socket.IO
+#
+# The Chrome extension is NOT a service — it loads from your local
+# unpacked `extension/dist/` folder and connects to the backend.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-webtogether}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webtogether}
+      POSTGRES_DB: ${POSTGRES_DB:-webtogether}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-webtogether}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CORS_ORIGIN: '*'
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-webtogether}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webtogether}
+      POSTGRES_DB: ${POSTGRES_DB:-webtogether}
+      DATABASE_MIGRATIONS_RUN: 'true'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES_IN: 7d
+      APP_URL: ${APP_URL:-https://webtogether.app}
+    ports:
+      - '3000:3000'
+
+volumes:
+  postgres_data:
+  redis_data:
